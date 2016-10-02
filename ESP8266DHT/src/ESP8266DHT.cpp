@@ -1,5 +1,4 @@
 #include <Arduino.h>
-
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266mDNS.h>
@@ -13,18 +12,14 @@ extern "C" {
 #include "user_interface.h"
 }
 
-#define PIN       4     // D2 on WEMOS
-#define DHTTYPE   DHT22
-#define DELAY     60000 // update once a minute
+#define PIN         4     // D2 on WEMOS
+#define DHTTYPE     DHT22 // DHT11 or DHT22
+#define DEEPSLEEP   600   // deep sleep for 600 sec
 
-const char* host = "esp8266DHT";
-char clientId[32];
+const char *project = "esp8266DHT";
+char host[32];
 
 os_timer_t myTimer;
-boolean tickOccured;
-void timerCallback(void *pArg) {
-  tickOccured = true;
-}
 
 DHT dht(PIN, DHTTYPE);
 WiFiClient wclient;
@@ -46,7 +41,7 @@ void callback (char* topic, byte* payload, uint8_t length) {
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting");
-  sprintf(clientId, "%s-%s", host, String(random(0xffff), HEX).c_str());
+  sprintf(host, "%s-%s", project, String(random(0xffff), HEX).c_str());
   WiFi.hostname(host);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -83,33 +78,11 @@ void setup() {
   ArduinoOTA.begin();
   Serial.println("Ready");
   Serial.print("Hostname: "); Serial.println(host);
-  Serial.print("ClientId: "); Serial.println(clientId);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
   // MQTT callback
   client.setCallback(callback);
-
-  // Timer
-  tickOccured = true;
-  /*
-   * os_timer_setfn - Define a function to be called when the timer fires
-   * void os_timer_setfn(
-   *   os_timer_t *pTimer,
-   *   os_timer_func_t *pFunction,
-   *   void *pArg)
-   * The pArg parameter is the value registered with the callback function.
-   */
-  os_timer_setfn(&myTimer, timerCallback, NULL);
-
-  /*
-   * os_timer_arm -  Enable a millisecond granularity timer.
-   * void os_timer_arm(
-   *   os_timer_t *pTimer,
-   *   uint32_t milliseconds,
-   *   bool repeat)
-   */
-  os_timer_arm(&myTimer, DELAY, true);
 
   dht.begin();
 }
@@ -118,35 +91,38 @@ void loop() {
   ArduinoOTA.handle();
   if (WiFi.status() == WL_CONNECTED) {
     if (!client.connected()) {
-      if (client.connect(clientId)) {
+      if (client.connect(host)) {
         client.subscribe("home/konni/temperature");
+        client.loop();
+        client.subscribe("home/konni/humidity");
+        client.loop();
       }
     }
 
     if (client.connected()) {
-      if (tickOccured) {
-        // read
-        float t = dht.readTemperature();
-        float h = dht.readHumidity();
+      // read
+      float t = dht.readTemperature();
+      float h = dht.readHumidity();
 
-        // make sure we're receiving a valid number
-        if (isnan(t) || (isnan(h)) || (t == 0)) {
-          Serial.println("DHT: reading failed, retrying in 5sec");
-          delay(5000);
-          return;
-        }
-
-        // publish
-        Serial.print("Temperature: ");
-        Serial.println(t);
-        client.publish("home/konni/temperature", String(t).c_str());
-
-        Serial.print("Humidity: ");
-        Serial.println(h);
-        client.publish("home/konni/humidity", String(h).c_str());
-        tickOccured = false;
+      // make sure we're receiving a valid number
+      if (isnan(t) || (isnan(h)) || (t == 0)) {
+        Serial.println("DHT: reading failed, retrying in 5sec");
+        delay(5000);
+        return;
       }
+
+      // publish
+      client.publish("home/konni/temperature", String(t).c_str());
       client.loop();
+      client.publish("home/konni/humidity", String(h).c_str());
+      client.loop();
+
+      // go to deep sleep mode
+      // make sure to connect D0 with RST
+      // device restarts at setup()!
+      Serial.print("going to deep sleep for "); Serial.print(DEEPSLEEP);
+      Serial.println(" seconds");
+      ESP.deepSleep(DEEPSLEEP*1000000, WAKE_RF_DEFAULT);
     }
   }
 }
