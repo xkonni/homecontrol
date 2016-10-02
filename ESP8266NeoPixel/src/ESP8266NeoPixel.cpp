@@ -28,8 +28,8 @@ const byte dim_curve[] = {
   146, 149, 151, 154, 157, 159, 162, 165, 168, 171, 174, 177, 180, 183, 186, 190,
   193, 196, 200, 203, 207, 211, 214, 218, 222, 226, 230, 234, 238, 242, 248, 255,
 };
-const char* host = "esp8266NeoPixel";
-char clientId[32];
+const char *project = "esp8266NeoPixel";
+char host[32];
 
 uint32_t getRGB(int hue, int sat, int val);
 
@@ -113,9 +113,9 @@ void callback (char* topic, byte* payload, uint8_t length) {
 }
 
 void setup() {
-  Serial.begin(76800);
+  Serial.begin(115200);
   Serial.println("Booting");
-  sprintf(clientId, "%s-%s", host, String(random(0xffff), HEX).c_str());
+  sprintf(host, "%s-%s", project, String(random(0xffff), HEX).c_str());
   WiFi.hostname(host);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -158,7 +158,6 @@ void setup() {
   ArduinoOTA.begin();
   Serial.println("Ready");
   Serial.print("Hostname: "); Serial.println(host);
-  Serial.print("ClientId: "); Serial.println(clientId);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
@@ -173,7 +172,7 @@ void loop() {
   ArduinoOTA.handle();
   if (WiFi.status() == WL_CONNECTED) {
     if (!client.connected()) {
-      if (client.connect(clientId)) {
+      if (client.connect(host)) {
         client.subscribe("NeoPixel");
         client.loop();
         client.subscribe("NeoPixelBrightness");
