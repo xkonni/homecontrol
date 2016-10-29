@@ -34,20 +34,25 @@ const byte dim_curve[] = {
 const char *project = "WEBNeoPixel";
 char host[32];
 enum showModes {
-  MODE_ON, MODE_OFF, MODE_RAINBOW
+  MODE_ON, MODE_OFF, MODE_RAINBOW, MODE_STROBOSCOPE, MODE_THEATERCHASE,
+  MODE_THEATERCHASERAINBOW
 };
 
 void handleColor();
+void updateWeb();
 void colorWipe(uint32_t c, uint8_t wait);
 void rainbow(uint8_t wait);
+void theaterChaseRainbow(uint8_t wait);
+void theaterChase(uint32_t c, uint8_t wait);
+void stroboscope(uint8_t wait);
 uint32_t Wheel(byte WheelPos);
 
 
 uint8_t showMode;
+uint8_t color_index;
 uint32_t color;
-String webPage = "";
+char webPage[1024];
 ESP8266WebServer server(80);
-uint8_t color_red, color_green, color_blue;
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(24, PIN, NEO_GRB + NEO_KHZ800);
 // Update these with values suitable for your network.
@@ -109,13 +114,8 @@ void setup() {
   colorWipe(color, 20);
   showMode = MODE_ON;
 
-  // populate webPage
-  webPage += "<html><head><title>TrixiPixel</title></head><body><h1>TrixiPixel </h1>";
-  webPage += "<p>power <a href=\"on\"><button>turn On</button></a>&nbsp;<a href=\"off\"><button>turn Off</button></a>&nbsp;<a href=\"rainbow\"><button>rainbow</button></a></p>";
-  webPage += "<p><form action=\"color\" method=\"POST\">set color</p><p>red: <input type=\"text\" name=\"red\" value=\"255\">green: <input type=\"text\" name=\"green\" value=\"0\"> blue: <input type=\"text\" name=\"blue\" value=\"255\"></p><p><input type=\"submit\" value=\"set\"></form>";
-  webPage += "</body></html>";
-
   server.on("/", [](){
+    updateWeb();
     server.send(200, "text/html", webPage);
   });
 
@@ -124,6 +124,7 @@ void setup() {
     showMode = MODE_ON;
     colorWipe(color, 20);
 
+    updateWeb();
     server.send(200, "text/html", webPage);
     Serial.println("on");
     delay(100);
@@ -133,6 +134,7 @@ void setup() {
     showMode = MODE_OFF;
     colorWipe(0, 20);
 
+    updateWeb();
     server.send(200, "text/html", webPage);
     Serial.println("off");
     delay(100);
@@ -145,10 +147,42 @@ void setup() {
   server.on("/rainbow", [](){
     showMode = MODE_RAINBOW;
 
+    updateWeb();
     server.send(200, "text/html", webPage);
     Serial.println("rainbow");
     delay(100);
   });
+
+  // theaterChase mode
+  server.on("/theaterChase", [](){
+    showMode = MODE_THEATERCHASE;
+
+    updateWeb();
+    server.send(200, "text/html", webPage);
+    Serial.println("theaterChase");
+    delay(100);
+  });
+
+  // theaterChaseRainbow mode
+  server.on("/theaterChaseRainbow", [](){
+    showMode = MODE_THEATERCHASERAINBOW;
+
+    updateWeb();
+    server.send(200, "text/html", webPage);
+    Serial.println("theaterChaseRainbow");
+    delay(100);
+  });
+
+  // stroboscope mode
+  server.on("/stroboscope", [](){
+    showMode = MODE_STROBOSCOPE;
+
+    updateWeb();
+    server.send(200, "text/html", webPage);
+    Serial.println("stroboscope");
+    delay(100);
+  });
+
 
   server.begin();
   Serial.println("HTTP server started");
@@ -168,12 +202,25 @@ void loop() {
     break;
 
     case MODE_RAINBOW:
-    rainbow(20);
+    rainbow(50);
+    break;
+
+    case MODE_STROBOSCOPE:
+    stroboscope(50);
+    break;
+
+    case MODE_THEATERCHASE:
+    theaterChase(color, 50);
+    break;
+
+    case MODE_THEATERCHASERAINBOW:
+    theaterChaseRainbow(50);
     break;
   }
 }
 
 void handleColor() {
+  uint8_t color_red, color_green, color_blue;
   Serial.print("color");
   if (server.args() > 0) {
     uint8_t i;
@@ -195,16 +242,12 @@ void handleColor() {
   Serial.println("");
 
   if ((color_red >= 0) && (color_green >= 0) && (color_blue >= 0)) {
-    char webPageC[1024];
     color = (color_blue) | (color_green << 8) | (color_red << 16);
     colorWipe(color, 20);
     showMode = MODE_ON;
 
-    sprintf(webPageC, "<html><head><title>TrixiPixel</title></head><body><h1>TrixiPixel </h1>");
-    sprintf(webPageC, "%s <p>power <a href=\"on\"><button>turn On</button></a>&nbsp;<a href=\"off\"><button>turn Off</button></a>&nbsp;<a href=\"rainbow\"><button>rainbow</button></a></p>", webPageC);
-    sprintf(webPageC, "%s <p><form action=\"color\" method=\"POST\">set color</p><p>red: <input type=\"text\" name=\"red\" value=\"%d\"> green: <input type=\"text\" name=\"green\" value=\"%d\"> blue: <input type=\"text\" name=\"blue\" value=\"%d\"></p><p><input type=\"submit\" value=\"set\"></form>", webPageC, color_red, color_green, color_blue);
-    sprintf(webPageC, "%s </body></html>", webPageC);
-    server.send(200, "text/html", webPageC);
+    updateWeb();
+    server.send(200, "text/html", webPage);
   }
   else server.send(200, "text/html", webPage);
 }
@@ -219,16 +262,52 @@ void colorWipe(uint32_t c, uint8_t wait) {
 }
 
 void rainbow(uint8_t wait) {
-  uint16_t i, j;
+  uint16_t i;
 
-  for(j=0; j<256; j++) {
-    for(i=0; i<strip.numPixels(); i++) {
-      color = Wheel((i+j) & 255);
-      strip.setPixelColor(i, color);
+  for(i=0; i<strip.numPixels(); i++) {
+    color = Wheel((i+color_index) & 255);
+    strip.setPixelColor(i, color);
+  }
+  color_index++;
+  strip.show();
+  delay(wait);
+}
+
+//Theatre-style crawling lights.
+void theaterChase(uint32_t c, uint8_t wait) {
+  for (int q=0; q < 3; q++) {
+    for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+      strip.setPixelColor(i+q, c);    //turn every third pixel on
     }
     strip.show();
     delay(wait);
+
+    for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+      strip.setPixelColor(i+q, 0);        //turn every third pixel off
+    }
   }
+}
+
+// Theatre-style crawling lights with rainbow effect
+void theaterChaseRainbow(uint8_t wait) {
+  for (int q=0; q < 3; q++) {
+    for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+      strip.setPixelColor(i+q, Wheel( (i+color_index) % 255));    //turn every third pixel on
+    }
+    strip.show();
+    delay(wait);
+
+    for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
+      strip.setPixelColor(i+q, 0);        //turn every third pixel off
+    }
+  }
+  color_index++;
+}
+
+void stroboscope(uint8_t wait) {
+  colorWipe(strip.Color(0, 0, 0), 0);
+  delay(wait);
+  colorWipe(strip.Color(255, 255, 255), 0);
 }
 
 // Input a value 0 to 255 to get a color value.
@@ -244,4 +323,20 @@ uint32_t Wheel(byte WheelPos) {
   }
   WheelPos -= 170;
   return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
+
+void updateWeb() {
+  uint8_t color_red, color_green, color_blue;
+  color_red = (color >> 16) & 0xFF;
+  color_green = (color >> 8) & 0xFF;
+  color_blue = color & 0xFF;
+  sprintf(webPage, "<html><head><title>TrixiPixel</title></head><body><h1>TrixiPixel </h1>");
+  sprintf(webPage, "%s <p><h2>power</h2></p>", webPage);
+  sprintf(webPage, "%s <p><a href=\"on\"><button>turn On (%3d/%3d/%3d)</button></a>&nbsp;<a href=\"off\"><button>turn Off</button></a></p>", webPage, color_red, color_green, color_blue);
+  sprintf(webPage, "%s <p><h2>effects</h2></p>", webPage);
+  sprintf(webPage, "%s <p><a href=\"rainbow\"><button>rainbow</button></a>&nbsp;<a href=\"stroboscope\"><button>stroboscope</button></a>", webPage);
+  sprintf(webPage, "%s <a href=\"theaterChase\"><button>theaterChase</button></a>&nbsp;<a href=\"theaterChaseRainbow\"><button>theaterChaseRainbow</button></a></p>", webPage);
+  sprintf(webPage, "%s <p><h2>set color (0 to 255)</h2></p>", webPage);
+  sprintf(webPage, "%s <form action=\"color\" method=\"POST\"><p>red: <input type=\"text\" name=\"red\" size=\"3\" maxlength=\"3\" value=\"%d\"> green: <input type=\"text\" name=\"green\" size=\"3\" maxlength=\"3\" value=\"%d\"> blue: <input type=\"text\" name=\"blue\" maxlength=\"3\" value=\"%d\"></p><p><input type=\"submit\" value=\"set\"></form>", webPage, color_red, color_green, color_blue);
+  sprintf(webPage, "%s </body></html>", webPage);
 }
