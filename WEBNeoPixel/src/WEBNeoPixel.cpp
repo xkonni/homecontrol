@@ -8,10 +8,11 @@
 #include <Adafruit_NeoPixel.h>
 #include "../../wifi.h"
 
-#define PIN 5 // D1 on WEMOS
-#define ADDR_RED        0
-#define ADDR_GREEN      1
-#define ADDR_BLUE       2
+#define PIXEL_PIN       5       // D1 on WEMOS
+#define BUTTON_PIN      4       // D2 on WEMOS
+#define PIXEL_COUNT     16
+#define INTERRUPTDELAY  1000    // 1 sec
+#define NUM_MODES       6
 
 const byte dim_curve[] = {
   0,   1,   1,   2,   2,   2,   2,   2,   2,   3,   3,   3,   3,   3,   3,   3,
@@ -33,11 +34,12 @@ const byte dim_curve[] = {
 };
 const char *project = "WEBNeoPixel";
 char host[32];
-enum showModes {
-  MODE_ON, MODE_OFF, MODE_RAINBOW, MODE_STROBOSCOPE, MODE_THEATERCHASE,
+enum MODES {
+  MODE_OFF, MODE_ON, MODE_RAINBOW, MODE_STROBOSCOPE, MODE_THEATERCHASE,
   MODE_THEATERCHASERAINBOW
 };
 
+void handleInterrupt();
 void handleColor();
 void updateWeb();
 void colorWipe(uint32_t c, uint8_t wait);
@@ -48,17 +50,20 @@ void stroboscope(uint8_t wait);
 uint32_t Wheel(byte WheelPos);
 
 
-uint8_t showMode;
+uint8_t showMode, prevMode;
 uint8_t color_index;
 uint32_t color;
+unsigned long interruptTime;
 char webPage[1024];
 ESP8266WebServer server(80);
 
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(24, PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(PIXEL_COUNT, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 // Update these with values suitable for your network.
 IPAddress MQTTserver(192, 168, 11, 21);
 
 void setup() {
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleInterrupt, CHANGE);
   Serial.begin(74880);
   Serial.println("Booting");
   sprintf(host, "%s-%s", project, String(random(0xffff), HEX).c_str());
@@ -113,6 +118,7 @@ void setup() {
   color = 0xFF00FF;
   colorWipe(color, 20);
   showMode = MODE_ON;
+  prevMode = MODE_OFF;
 
   server.on("/", [](){
     updateWeb();
@@ -198,24 +204,50 @@ void loop() {
   server.handleClient();
   switch(showMode) {
     case MODE_ON:
+      if (showMode != prevMode) {
+        prevMode = showMode;
+        // only handle once
+        colorWipe(color, 20);
+      }
+      break;
     case MODE_OFF:
+      if (showMode != prevMode) {
+        prevMode = showMode;
+        // only handle once
+        colorWipe(0, 20);
+      }
     break;
 
     case MODE_RAINBOW:
-    rainbow(50);
+      if (showMode != prevMode) prevMode = showMode;
+      rainbow(50);
     break;
 
     case MODE_STROBOSCOPE:
-    stroboscope(50);
+      if (showMode != prevMode) prevMode = showMode;
+      stroboscope(50);
     break;
 
     case MODE_THEATERCHASE:
-    theaterChase(color, 50);
+      if (showMode != prevMode) prevMode = showMode;
+      theaterChase(color, 50);
     break;
 
     case MODE_THEATERCHASERAINBOW:
-    theaterChaseRainbow(50);
+      if (showMode != prevMode) prevMode = showMode;
+      theaterChaseRainbow(50);
     break;
+  }
+}
+
+void handleInterrupt() {
+  unsigned long currentTime = millis();
+  if (currentTime - interruptTime > INTERRUPTDELAY) {
+    interruptTime = millis();
+    showMode++;
+    if (showMode >= NUM_MODES) showMode = 0;
+    Serial.print("Mode["); Serial.print(prevMode); Serial.println("] -> ");
+    Serial.print("Mode["); Serial.print(showMode); Serial.println("] ");
   }
 }
 
